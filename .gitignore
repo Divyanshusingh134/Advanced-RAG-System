@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Database
+chroma_storage/
+
+# Python Artifacts
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+
+# Editor and System Files
+.vscode/
+.DS_Store

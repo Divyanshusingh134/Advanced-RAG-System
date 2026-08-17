@@ -144,6 +144,7 @@ async def relevance_score(result: str, query: str):
     normalized_score = 1 / (1 + math.exp(-raw_score))
     return round(normalized_score, 2)
 
+
 async def re_ranking(retrieved_chunks: list[str], query: str, top_k:int = 3) -> list[str]:
     # loop through evry query
     if not retrieved_chunks:

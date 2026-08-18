@@ -18,7 +18,7 @@ if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is missing from the environment")
 
 embedding_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent"
-generation_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+generation_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
 
 
 noisy_loggers = [
@@ -309,8 +309,10 @@ async def main():
         
         query_vectors = await embed(http_client, queries)
         with open("eval_results.md", "a+") as file:
-
-            for k, query in enumerate(queries[5:10], start=5):
+            file.write("## RAG Evaluation Results\n\n")
+            relevance_sum = 0
+            faithful_count = 0
+            for k, query in enumerate(queries):
                 if not query_vectors or len(query_vectors) <= k:
                     logging.warning(f"Query vector for query {k} is missing")
                     continue
@@ -347,26 +349,25 @@ async def main():
                 print("\n")
                 score = await faithfulness_score(http_client=http_client, retrieved_chunks=results_sentance_window["documents"][0], query=query, result=result)
                 print(score)
+                faithful_count += score
                 print()
                 relevant_score = await relevance_score(query=query, result=result)
+                relevance_sum += relevant_score
                 print(relevant_score)        
                 file.write(f"###Query {k + 1}: {query}\n\n")
                 file.write(f"**Generated Answer:** {result}\n\n")
                 file.write(f"- **Relevance Score:** {relevant_score}\n\n")   
                 file.write(f"- **Faithfulness Score:** {score}\n\n")
                 file.write("---\n\n")
-
                 await asyncio.sleep(30)
-            # print(f"\nQuery: {query}")
-            # print("=" * 40)
-            # print("_" *20, "FIXED-SIZE-CHUNKING", "_" * 20)
-            # result = await generation(http_client, query=query, retrieved_chunks=results_fixed_size["documents"][0], max_attempts=3)
-            # if result is None:
-            #     logging.error("Failed to extract task")
-            #     raise
-            # for result in results_fixed_size["documents"][0]:
-            #     print(result)
-            #     print("="*100)
+
+            avg_relevance = relevance_sum / len(queries) if len(queries) > 0 else 0
+            file.write("## Summary\n\n")
+            file.write(f"- **Total Questions:** {len(queries)}\n")
+            file.write(f"- **Average Relevance Score:** {avg_relevance:.2f}\n")
+            file.write(f"- **Faithfulness:** {faithful_count}/{len(queries)} ({faithful_count/len(queries)*100:.0f}%)\n")
+            file.write(f"- **Chunking Strategy:** Sentence-Window (window=5, overlap=2)\n")
+            file.write(f"- **Reranker:** cross-encoder/ms-marco-MiniLM-L-6-v2\n")
             
         
 if __name__ == "__main__":

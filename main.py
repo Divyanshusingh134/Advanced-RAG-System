@@ -119,8 +119,13 @@ async def faithfulness_score(http_client: httpx.AsyncClient, retrieved_chunks: l
                 score = int(match.group()) if match else 0
             return score
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 or e.response.status_code >= 500:
+            if e.response.status_code == 429:
                 wait_time = 35 + (10 * attempt)
+                logging.warning(f"Rate Limited {e.response.status_code}, Body: {e.response.text}")
+                logging.warning(f"Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            if e.response.status_code >= 500:
+                wait_time = 60 + (20 * attempt)
                 logging.warning(f"Rate Limited {e.response.status_code}, Body: {e.response.text}")
                 logging.warning(f"Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
@@ -304,7 +309,8 @@ async def main():
         
         query_vectors = await embed(http_client, queries)
         with open("eval_results.md", "a+") as file:
-            for k, query in enumerate(queries[3:5]):
+
+            for k, query in enumerate(queries[5:10], start=5):
                 if not query_vectors or len(query_vectors) <= k:
                     logging.warning(f"Query vector for query {k} is missing")
                     continue

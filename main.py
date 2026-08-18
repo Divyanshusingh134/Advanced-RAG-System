@@ -201,7 +201,7 @@ async def embed(http_client: httpx.AsyncClient, chunks: list, concurrency_limit:
     return [task.result() for task in tasks]
 
 # Get the chunks using sentance window with nltk 
-def sentance_window(file_path: str, chunks_size:int, overlap = 2) -> list:
+def sentence_window(file_path: str, chunks_size:int, overlap = 2) -> list:
     chunks = []
     if overlap >= chunks_size:
         raise ValueError(f"overlap ({overlap}) must be less than chunks size ({chunks_size})")
@@ -267,7 +267,7 @@ async def main():
         if collection_sentence_window.count() == 0:
             file_path =  'text.txt'
             # get chunks
-            chunks = sentance_window(file_path=file_path, chunks_size=5, overlap=2)
+            chunks = sentence_window(file_path=file_path, chunks_size=5, overlap=2)
             # get ids
             ids = [hashlib.md5(chunk.encode("utf-8")).hexdigest() for chunk in chunks]
             #  get metadats
@@ -310,13 +310,19 @@ async def main():
         query_vectors = await embed(http_client, queries)
         with open("eval_results.md", "a+") as file:
             file.write("## RAG Evaluation Results\n\n")
+            stats = {
+                "sentence": {"relevance" : 0.0, 
+                             "faithful": 0},
+                "fixed": {"relevance" : 0.0, 
+                             "faithful": 0},
+            }
             relevance_sum = 0
             faithful_count = 0
             for k, query in enumerate(queries):
                 if not query_vectors or len(query_vectors) <= k:
                     logging.warning(f"Query vector for query {k} is missing")
                     continue
-
+                # get the result for both 
                 results_fixed_size = collection_fixed_size.query(
                     query_embeddings=[query_vectors[k]],
                     n_results=2
@@ -333,41 +339,61 @@ async def main():
                     logging.warning(f"No document matches returned for query: {query}")
                     continue
 
-                top_results = await re_ranking(retrieved_chunks=results_sentance_window["documents"][0], query=query)
-                if not top_results:
+                top_sentence = await re_ranking(retrieved_chunks=results_sentance_window["documents"][0], query=query)
+                top_fixed = await re_ranking(retrieved_chunks=results_fixed_size["documents"][0], query=query)
+
+                if not top_sentence:
+                    logging.info(f"No Matched result found for Query: {query}")
+                    continue
+                if not top_fixed:
                     logging.info(f"No Matched result found for Query: {query}")
                     continue
 
-                
-                result = await generation(http_client, query=query, retrieved_chunks=top_results, max_attempts=3)
-                
-                if result is None:
+
+                result_sentence = await generation(http_client, query=query, retrieved_chunks=top_sentence, max_attempts=3)
+                result_fixed = await generation(http_client=http_client, query=query, retrieved_chunks=top_fixed)
+                if result_sentence is None:
                     logging.error("Failed to extract task")
                     raise
-                print(f"\nQuery: {query}")
-                print(result)
-                print("\n")
-                score = await faithfulness_score(http_client=http_client, retrieved_chunks=results_sentance_window["documents"][0], query=query, result=result)
-                print(score)
-                faithful_count += score
-                print()
-                relevant_score = await relevance_score(query=query, result=result)
-                relevance_sum += relevant_score
-                print(relevant_score)        
-                file.write(f"###Query {k + 1}: {query}\n\n")
-                file.write(f"**Generated Answer:** {result}\n\n")
-                file.write(f"- **Relevance Score:** {relevant_score}\n\n")   
-                file.write(f"- **Faithfulness Score:** {score}\n\n")
-                file.write("---\n\n")
-                await asyncio.sleep(30)
+                if result_fixed is None:
+                    logging.error("Failed to extract task")
+                    raise
 
-            avg_relevance = relevance_sum / len(queries) if len(queries) > 0 else 0
+                file.write(f"### Query {k + 1}: {query}\n\n")
+                faith_score_sentence = await faithfulness_score(http_client=http_client, retrieved_chunks=results_sentance_window["documents"][0], query=query, result=result_sentence)
+                faith_score_fixed = await faithfulness_score(http_client=http_client, retrieved_chunks=results_fixed_size["documents"][0], query=query, result=result_fixed)
+
+                relevant_score_sentence = await relevance_score(query=query, result=result_sentence)
+                relevant_score_fixed = await relevance_score(query=query, result=result_fixed)
+
+                stats["fixed"]["relevance"] += relevant_score_fixed
+                stats["fixed"]["faithful"] += faith_score_fixed
+                stats["sentence"]["relevance"] += relevant_score_sentence
+                stats["sentence"]["faithful"] += faith_score_sentence
+                file.write(f"#### Strategy: Sentence Window\n")
+                file.write(f"** Answer:** {result_sentence}\n")
+                file.write(f"- **Relevance:** {relevant_score_sentence} | **Faithfulness:** {faith_score_sentence}\n\n")
+
+                file.write(f"#### Strategy: Fixed Size\n")
+                file.write(f"** Answer:** {result_fixed}\n")
+                file.write(f"- **Relevance:** {relevant_score_fixed} | **Faithfulness:** {faith_score_fixed}\n\n")
+
+                file.write("---\n\n")
+                await asyncio.sleep(4)
+
+            avg_rel_sent = stats["sentence"]["relevance"] / len(queries)
+            avg_rel_fix = stats["fixed"]["relevance"] / len(queries)
+
             file.write("## Summary\n\n")
-            file.write(f"- **Total Questions:** {len(queries)}\n")
-            file.write(f"- **Average Relevance Score:** {avg_relevance:.2f}\n")
-            file.write(f"- **Faithfulness:** {faithful_count}/{len(queries)} ({faithful_count/len(queries)*100:.0f}%)\n")
-            file.write(f"- **Chunking Strategy:** Sentence-Window (window=5, overlap=2)\n")
-            file.write(f"- **Reranker:** cross-encoder/ms-marco-MiniLM-L-6-v2\n")
+            file.write(f"- **Total Questions:** {len(queries)}\n\n")
+            file.write("### Sentence-Window Strategy\n")
+            file.write(f"- **Average Relevance Score:** {avg_rel_sent:.2f}\n")
+            file.write(f"- **Faithfulness:** {stats['sentence']['faithful']}/{len(queries)} ({(stats['sentence']['faithful']/len(queries))*100:.0f}%)\n\n")
+            
+            file.write("### Fixed-Size Strategy\n")
+            file.write(f"- **Average Relevance Score:** {avg_rel_fix:.2f}\n")
+            file.write(f"- **Faithfulness:** {stats['fixed']['faithful']}/{len(queries)} ({(stats['fixed']['faithful']/len(queries))*100:.0f}%)\n")
+
             
         
 if __name__ == "__main__":

@@ -350,7 +350,7 @@ async def main():
                 file.write(f"- **Faithfulness Score:** {score}\n\n")
                 file.write("---\n\n")
 
-                await asyncio.sleep(25)
+                await asyncio.sleep(30)
             # print(f"\nQuery: {query}")
             # print("=" * 40)
             # print("_" *20, "FIXED-SIZE-CHUNKING", "_" * 20)

@@ -52,7 +52,7 @@ class GeminiClient:
         async with semaphore:
             for attempt in range(self.max_retries):
                 try:
-                    response = await http_client.post(url=embedding_url, json=payload)
+                    response = await http_client.post(url=self.embedding_url, json=payload)
                     response.raise_for_status()
                     raw_data = response.json()
                     if "embedding" not in raw_data or "values" not in raw_data["embedding"]:
@@ -75,7 +75,7 @@ class GeminiClient:
 
         async with asyncio.TaskGroup() as tg:
             for i, chunk in enumerate(chunks):
-                task = tg.create_task(fetch_data(http_client=http_client, chunk=chunk, index=i, total_chunks=len(chunks), semaphore=semaphore))
+                task = tg.create_task(self.fetch_data(http_client=http_client, chunk=chunk, index=i, total_chunks=len(chunks), semaphore=semaphore))
                 tasks.append(task)
 
         return [task.result() for task in tasks]
@@ -153,13 +153,23 @@ class RAGPipeline:
     async def run_evaluator(self, data_file: str, queries_file: str, output_file: str):
         HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=self.llm.headers) as http_client:
-            sentence_window_chunks = TextProcessor.sentence_window(file_path=data_file, chunks_size=5, overlap=2)
-            fixed_size_data = TextProcessor.fixed_size_chunks(file_path=data_file, overlap=50, chunks_size=200)
 
             collection_sentence_window = self.db.setup_collection("collection_sentence_window")
             collection_fixed_size = self.db.setup_collection("collection_fixed_size")
 
-            
+            if collection_sentence_window.count() == 0:
+                sentence_window_chunks = TextProcessor.sentence_window(file_path=data_file, chunks_size=5, overlap=2)
+                sentence_window_vectors = await self.llm.embed(http_client=http_client, chunks=sentence_window_chunks)
+                self.db.upsert_document(collection_sentence_window, chunks=sentence_window_chunks, vectors=sentence_window_vectors, file_path=data_file)
+                
+            if collection_fixed_size.count() == 0:
+                fixed_size_data = TextProcessor.fixed_size_chunks(file_path=data_file, overlap=50, chunks_size=200)
+                fixed_size_vectors = await self.llm.embed(http_client=http_client, chunks=fixed_size_data)
+                self.db.upsert_document(collection_fixed_size, chunks=fixed_size_data, vectors=fixed_size_vectors, file_path=data_file)
+
+
+
+
 
 
 

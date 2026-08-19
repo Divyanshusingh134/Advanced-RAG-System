@@ -6,12 +6,22 @@ import hashlib
 import math
 import asyncio
 import re
+import argparse
 from nltk import sent_tokenize
 from dotenv import load_dotenv
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 from sentence_transformers import CrossEncoder
-#----Get the api key and the urls----
-load_dotenv()
+
+
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    try:
+        nltk.data.find("tokenizers/punkt")
+    except LookupError:
+        nltk.download("punkt_tab", quiet=True)
+        nltk.download("punkt", quiet=True)
+
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -349,9 +359,15 @@ class RAGPipeline:
 
 if __name__ == "__main__":
     load_dotenv()
+    parser = argparse.ArgumentParser(description="RAG Pipeline Evaluator")
+    parser.add_argument("--data", required=True, help="path of text file")
+    parser.add_argument("--queries", required=True, help="Path of queries file")
+    parser.add_argument("--output", default="eval_results.md", help="Output file")
+    args = parser.parse_args()
     api_key = os.getenv("GEMINI_API_KEY")
+
     if not api_key:
         raise RuntimeError("API key missing")
 
     pipeline = RAGPipeline(api_key=api_key)
-    asyncio.run(pipeline.run_evaluator("text.txt", "queries.txt", "eval_results.md"))
+    asyncio.run(pipeline.run_evaluator(args.data, args.queries, args.output))

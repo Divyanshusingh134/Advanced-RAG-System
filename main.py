@@ -7,6 +7,7 @@ import math
 import asyncio
 import re
 import argparse
+import nltk
 from nltk import sent_tokenize
 from dotenv import load_dotenv
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
